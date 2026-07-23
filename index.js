@@ -1,6 +1,6 @@
 import express from "express";
 import crypto from "crypto";
-import { Client, GatewayIntentBits } from "discord.js";
+import { Client, GatewayIntentBits, ActivityType } from "discord.js";
 
 const {
   DISCORD_BOT_TOKEN,
@@ -10,6 +10,7 @@ const {
   TARGET_FOLDER,    // e.g. "uploads" (matches that folder and everything under it)
   BRANCH = "main",
   PORT = 3000,
+  GITHUB_TOKEN, // optional, raises GitHub API rate limits for the file-count check
 } = process.env;
 
 const required = {
@@ -36,8 +37,12 @@ let discordReady = false;
 client.once("ready", () => {
   console.log(`Discord bot logged in as ${client.user.tag}`);
   discordReady = true;
+  updateFileCountStatus();
 });
 client.login(DISCORD_BOT_TOKEN);
+
+// Safety net in case files change outside a tracked push event
+setInterval(updateFileCountStatus, 15 * 60 * 1000);
 
 // --- Web server for the GitHub webhook ---
 const app = express();
@@ -65,6 +70,34 @@ function verifySignature(req) {
 
 function isInTargetFolder(filePath) {
   return filePath === normalizedFolder || filePath.startsWith(normalizedFolder + "/");
+}
+
+async function updateFileCountStatus() {
+  try {
+    const url = `https://api.github.com/repos/${GITHUB_REPO}/contents/${encodeURI(
+      normalizedFolder
+    )}?ref=${BRANCH}`;
+    const headers = { Accept: "application/vnd.github+json" };
+    if (GITHUB_TOKEN) headers.Authorization = `Bearer ${GITHUB_TOKEN}`;
+
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      console.error(`Couldn't fetch folder contents for status update (HTTP ${res.status})`);
+      return;
+    }
+
+    const contents = await res.json();
+    const fileCount = Array.isArray(contents)
+      ? contents.filter((item) => item.type === "file").length
+      : 0;
+
+    if (discordReady) {
+      client.user.setActivity(`${fileCount} Manifests`, { type: ActivityType.Watching });
+      console.log(`Status updated: ${fileCount} Manifests`);
+    }
+  } catch (err) {
+    console.error("Error updating file count status:", err);
+  }
 }
 
 app.get("/", (_req, res) => {
@@ -104,23 +137,25 @@ app.post("/webhook", async (req, res) => {
     }
 
     const matching = [...changedFiles].filter(isInTargetFolder);
-    if (matching.length === 0) return;
 
-    if (!discordReady) {
-      console.warn("Discord client wasn't ready yet — skipping this batch:", matching);
-      return;
+    if (matching.length > 0) {
+      if (!discordReady) {
+        console.warn("Discord client wasn't ready yet — skipping this batch:", matching);
+      } else {
+        const channel = await client.channels.fetch(DISCORD_CHANNEL_ID);
+        for (const filePath of matching) {
+          const filename = filePath.split("/").pop();
+          const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
+          const rawUrl = `https://raw.githubusercontent.com/${GITHUB_REPO}/${refBranch}/${encodeURI(
+            filePath
+          )}`;
+          await channel.send(`[${nameWithoutExt}](<${rawUrl}>)`);
+        }
+      }
     }
 
-    const channel = await client.channels.fetch(DISCORD_CHANNEL_ID);
-
-    for (const filePath of matching) {
-      const filename = filePath.split("/").pop();
-      const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
-      const rawUrl = `https://raw.githubusercontent.com/${GITHUB_REPO}/${refBranch}/${encodeURI(
-        filePath
-      )}`;
-      await channel.send(`[${nameWithoutExt}](<${rawUrl}>)`);
-    }
+    // Recount regardless — a push could also remove files from the folder
+    await updateFileCountStatus();
   } catch (err) {
     console.error("Error handling webhook payload:", err);
   }
