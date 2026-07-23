@@ -101,6 +101,10 @@ function isInTargetFolder(filePath) {
   return filePath === normalizedFolder || filePath.startsWith(normalizedFolder + "/");
 }
 
+function stripExtension(filename) {
+  return filename.replace(/\.[^/.]+$/, "");
+}
+
 // Cache of files in the watched folder, so /manifest and its autocomplete can respond
 // instantly instead of hitting the GitHub API on every keystroke. Refreshed by
 // updateFileCountStatus (on startup, every 15 min, and after each relevant push).
@@ -142,9 +146,12 @@ client.on("interactionCreate", async (interaction) => {
     const focused = interaction.options.getFocused().toLowerCase();
 
     const choices = folderFilesCache
-      .filter((f) => f.name.toLowerCase().includes(focused))
+      .filter((f) => stripExtension(f.name).toLowerCase().includes(focused))
       .slice(0, 25) // Discord's max
-      .map((f) => ({ name: f.name, value: f.name }));
+      .map((f) => {
+        const nameWithoutExt = stripExtension(f.name);
+        return { name: nameWithoutExt, value: nameWithoutExt };
+      });
 
     try {
       await interaction.respond(choices);
@@ -163,10 +170,10 @@ client.on("interactionCreate", async (interaction) => {
   try {
     // Prefer an exact filename match (e.g. picked from the autocomplete list),
     // fall back to a partial/substring match otherwise.
-    const exact = folderFilesCache.filter((f) => f.name.toLowerCase() === query);
+    const exact = folderFilesCache.filter((f) => stripExtension(f.name).toLowerCase() === query);
     const matches = exact.length > 0
       ? exact
-      : folderFilesCache.filter((f) => f.name.toLowerCase().includes(query));
+      : folderFilesCache.filter((f) => stripExtension(f.name).toLowerCase().includes(query));
 
     if (matches.length === 0) {
       await interaction.editReply(`No files matching **${query}** found in \`${normalizedFolder}\`.`);
@@ -175,7 +182,7 @@ client.on("interactionCreate", async (interaction) => {
 
     const MAX_RESULTS = 20;
     const lines = matches.slice(0, MAX_RESULTS).map((f) => {
-      const nameWithoutExt = f.name.replace(/\.[^/.]+$/, "");
+      const nameWithoutExt = stripExtension(f.name);
       const rawUrl = `https://raw.githubusercontent.com/${GITHUB_REPO}/${BRANCH}/${encodeURI(f.path)}`;
       return `[${nameWithoutExt}](<${rawUrl}>)`;
     });
@@ -236,7 +243,7 @@ app.post("/webhook", async (req, res) => {
         const channel = await client.channels.fetch(DISCORD_CHANNEL_ID);
         for (const filePath of matching) {
           const filename = filePath.split("/").pop();
-          const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
+          const nameWithoutExt = stripExtension(filename);
           const rawUrl = `https://raw.githubusercontent.com/${GITHUB_REPO}/${refBranch}/${encodeURI(
             filePath
           )}`;
