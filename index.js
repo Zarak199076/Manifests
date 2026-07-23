@@ -129,24 +129,3 @@ app.post("/webhook", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Webhook server listening on port ${PORT}`);
 });
-      console.warn("Discord client wasn't ready yet — skipping this batch:", matching);
-      return;
-    }
-
-    const channel = await client.channels.fetch(DISCORD_CHANNEL_ID);
-
-    for (const filePath of matching) {
-      const filename = filePath.split("/").pop();
-      const rawUrl = `https://raw.githubusercontent.com/${GITHUB_REPO}/${refBranch}/${encodeURI(
-        filePath
-      )}`;
-      await channel.send(`[${filename}](<${rawUrl}>)`);
-    }
-  } catch (err) {
-    console.error("Error handling webhook payload:", err);
-  }
-});
-
-app.listen(PORT, () => {
-  console.log(`Webhook server listening on port ${PORT}`);
-});
