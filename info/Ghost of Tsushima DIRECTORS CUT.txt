@@ -1,0 +1,4 @@
+Description = "A storm is coming. Venture into the complete Ghost of Tsushima DIRECTOR’S CUT on PC; forge your own path through this open-world action adventure and uncover its hidden wonders. Brought to you by Sucker Punch Productions, Nixxes Software and PlayStation Studios."
+app_id = "2215430"
+Price = "$59.99"
+Developer = "Sucker Punch Productions, Nixxes Software"
