@@ -1,0 +1,4 @@
+Description = "In Marvel’s Spider-Man Remastered, the worlds of Peter Parker and Spider-Man collide in an original action-packed story. Play as an experienced Peter Parker, fighting big crime and iconic villains in Marvel’s New York. Web-swing through vibrant neighborhoods and defeat villains with epic takedowns."
+app_id = "1817070"
+Price = "$59.99"
+Developer = "Insomniac Games, Nixxes Software"
