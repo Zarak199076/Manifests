@@ -1,0 +1,4 @@
+Description = "The poker roguelike. Balatro is a hypnotically satisfying deckbuilder where you play illegal poker hands, discover game-changing jokers, and trigger adrenaline-pumping, outrageous combos."
+app_id = "2379780
+Price = "14.99"
+Developer = "Playstack"
