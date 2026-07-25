@@ -1,0 +1,4 @@
+Description = "Prepare the perfect heist in a fully destructible, simulated voxel world. Tear down walls with vehicles or use explosives to create your own shortcuts. Shape the environment to your advantage in the most creative ways you can imagine. Play solo or with up to 12 players in multiplayer."
+app_id = "1167630"
+Price = "$29.99"
+Developer = "Tuxedo Labs"
