@@ -1,0 +1,4 @@
+Description = "Bodycam is the first tactical multiplayer FPS with a true body-camera view in Unreal Engine 5. Close-quarters combats feel raw and loud. Every angle, callout, and bullet matters. Play Deathmatch, Team Deathmatch, and Body Bomb on photoreal maps"
+app_id = "2406770"
+Price = "$33.32"
+Developer = "Reissad Studio"
