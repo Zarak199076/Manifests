@@ -1,0 +1,4 @@
+Description = "Pushing the boundaries of what fans have come to expect from the record-setting entertainment franchise, Call of Duty®: Black Ops II propels players into a near future Cold War"
+app_id = "202970"
+Price = "$39.99"
+Developer = "Treyarch"
