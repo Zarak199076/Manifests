@@ -22,6 +22,7 @@ const {
             // without it, global commands can take up to ~1 hour to show up everywhere
   IMAGE_FOLDER = "images", // folder to look in for a matching image (same base filename)
   TEXT_FOLDER = "info", // folder to look in for a matching .txt info file (same base filename)
+  STATS_FILE_PATH = ".manifest-bot/stats.json", // where pull counts are stored in the repo
 } = process.env;
 
 const required = {
@@ -51,6 +52,7 @@ client.once("ready", async () => {
   console.log(`Discord bot logged in as ${client.user.tag}`);
   discordReady = true;
   updateFileCountStatus();
+  await loadManifestStats();
 
   const manifestCommand = {
     name: "manifest",
@@ -91,12 +93,27 @@ client.once("ready", async () => {
 
   try {
     if (GUILD_ID) {
-      const guild = await client.guilds.fetch(GUILD_ID);
-      await guild.commands.set(commands);
+      // Register scoped to just this guild — instant, no ~1hr propagation delay.
+      const targetGuild = await client.guilds.fetch(GUILD_ID);
+      await targetGuild.commands.set(commands);
       console.log(`Registered commands in guild ${GUILD_ID}`);
+
+      // Clear global commands so an old global registration can't linger alongside this one.
+      await client.application.commands.set([]);
     } else {
       await client.application.commands.set(commands);
       console.log("Registered commands globally (may take up to an hour to appear)");
+    }
+
+    // Clear any leftover guild-specific commands in every OTHER guild the bot is in.
+    // This cleans up duplicates left behind by switching GUILD_ID on/off across deploys.
+    for (const [id, guild] of client.guilds.cache) {
+      if (GUILD_ID && id === GUILD_ID) continue; // already handled above
+      try {
+        await guild.commands.set([]);
+      } catch (err) {
+        console.warn(`Couldn't clear guild commands in ${guild.name} (${id}):`, err.message);
+      }
     }
   } catch (err) {
     console.error("Failed to register commands:", err);
@@ -255,6 +272,96 @@ function formatDate(date) {
   return date.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 }
 
+// --- Pull-count stats, persisted as a JSON file committed into the watched repo ---
+// (Railway's filesystem doesn't survive redeploys, so counting in-memory only
+// would reset every time the bot restarts.)
+let manifestStats = {}; // { "terraria": 5, ... } keyed by lowercase name-without-extension
+let statsSha = null; // current file SHA, needed to update it via the GitHub API
+let statsDirty = false;
+
+async function loadManifestStats() {
+  try {
+    const url = `https://api.github.com/repos/${GITHUB_REPO}/contents/${encodeURI(
+      STATS_FILE_PATH
+    )}?ref=${BRANCH}`;
+    const headers = { Accept: "application/vnd.github+json" };
+    if (GITHUB_TOKEN) headers.Authorization = `Bearer ${GITHUB_TOKEN}`;
+
+    const res = await fetch(url, { headers });
+    if (res.status === 404) {
+      manifestStats = {};
+      statsSha = null;
+      console.log("No existing pull-stats file yet — starting fresh");
+      return;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const data = await res.json();
+    statsSha = data.sha;
+    manifestStats = JSON.parse(Buffer.from(data.content, "base64").toString("utf-8"));
+    console.log(`Loaded pull stats for ${Object.keys(manifestStats).length} file(s)`);
+  } catch (err) {
+    console.error("Error loading manifest stats:", err);
+    manifestStats = {};
+  }
+}
+
+async function saveManifestStats() {
+  if (!GITHUB_TOKEN) {
+    console.warn("GITHUB_TOKEN not set — pull counts will reset on next deploy");
+    return;
+  }
+  try {
+    const body = {
+      message: "Update manifest pull stats",
+      content: Buffer.from(JSON.stringify(manifestStats, null, 2)).toString("base64"),
+      branch: BRANCH,
+    };
+    if (statsSha) body.sha = statsSha;
+
+    const url = `https://api.github.com/repos/${GITHUB_REPO}/contents/${encodeURI(STATS_FILE_PATH)}`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${GITHUB_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      // Likely a stale SHA (someone/something else wrote in the meantime) — reload and retry once.
+      if (res.status === 409 || res.status === 422) {
+        await loadManifestStats();
+        return;
+      }
+      throw new Error(`HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    statsSha = data.content?.sha ?? statsSha;
+    statsDirty = false;
+  } catch (err) {
+    console.error("Error saving manifest stats:", err);
+  }
+}
+
+function recordManifestPull(nameWithoutExt) {
+  const key = nameWithoutExt.toLowerCase();
+  manifestStats[key] = (manifestStats[key] || 0) + 1;
+  statsDirty = true;
+}
+
+function getPullCount(nameWithoutExt) {
+  return manifestStats[nameWithoutExt.toLowerCase()] || 0;
+}
+
+// Batches writes instead of committing to GitHub on every single /manifest call
+setInterval(() => {
+  if (statsDirty) saveManifestStats();
+}, 2 * 60 * 1000);
+
 async function updateFileCountStatus() {
   try {
     const files = await fetchFolderFiles();
@@ -401,6 +508,8 @@ client.on("interactionCreate", async (interaction) => {
     const nameWithoutExt = stripExtension(file.name);
     const rawUrl = `https://raw.githubusercontent.com/${GITHUB_REPO}/${BRANCH}/${encodeURI(file.path)}`;
 
+    recordManifestPull(nameWithoutExt);
+
     const [imageUrl, addedDate, infoData] = await Promise.all([
       findMatchingImage(nameWithoutExt),
       getFileAddedDate(file.path),
@@ -410,6 +519,7 @@ client.on("interactionCreate", async (interaction) => {
     const fields = [
       { name: "File Size", value: formatFileSize(file.size), inline: true },
       { name: "Added", value: addedDate ? formatDate(addedDate) : "Unknown", inline: true },
+      { name: "Pulled", value: `${getPullCount(nameWithoutExt)} times`, inline: true },
     ];
     if (infoData?.Price) fields.push({ name: "Price", value: infoData.Price, inline: true });
     if (infoData?.Developer) fields.push({ name: "Developer", value: infoData.Developer, inline: true });
