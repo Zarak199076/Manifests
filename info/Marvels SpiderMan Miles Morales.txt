@@ -1,0 +1,4 @@
+Description = "After the events of Marvel’s Spider-Man Remastered, teenage Miles Morales is adjusting to his new home while following in the footsteps of his mentor, Peter Parker, as a new Spider-Man. When a fierce power struggle threatens to destroy his home, Miles must take up the mantle of Spider-Man and own it"
+app_id = "1817190"
+Price = "$49.99"
+Developer = "Insomniac Games, Nixxes Software"
