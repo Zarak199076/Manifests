@@ -1,0 +1,4 @@
+Description = "The world's first science-based photorealistic interactive 3D planetarium that models the entire Universe, using procedural generation for uncharted areas."
+app_id = "314650"
+Price = "$29.99"
+Developer = "Cosmographic Software"
