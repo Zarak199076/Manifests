@@ -1,0 +1,4 @@
+Description = "Factorio is a game about building and creating automated factories to produce items of increasing complexity, within an infinite 2D world. Use your imagination to design your factory, combine simple elements into ingenious structures, and finally protect it from the creatures who don't really like you."
+app_id = "427520"
+Price = "$35.00"
+Developer = "Wube Software LTD."
