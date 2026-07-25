@@ -1,0 +1,4 @@
+Description = "Dig, fight, explore, build! Nothing is impossible."
+Price = "$9.99"
+Developer = "Re-Logic"
+Last Updated = "May 16, 2011"
