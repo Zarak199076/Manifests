@@ -1,6 +1,13 @@
 import express from "express";
 import crypto from "crypto";
-import { Client, GatewayIntentBits, ActivityType, EmbedBuilder } from "discord.js";
+import {
+  Client,
+  GatewayIntentBits,
+  ActivityType,
+  EmbedBuilder,
+  ChannelType,
+  PermissionFlagsBits,
+} from "discord.js";
 
 const {
   DISCORD_BOT_TOKEN,
@@ -45,7 +52,7 @@ client.once("ready", async () => {
   discordReady = true;
   updateFileCountStatus();
 
-  const command = {
+  const manifestCommand = {
     name: "manifest",
     description: "Get the download link for a file in the watched folder",
     options: [
@@ -59,17 +66,40 @@ client.once("ready", async () => {
     ],
   };
 
+  const requestOptionSchema = [
+    {
+      name: "details",
+      description: "Briefly describe what you need",
+      type: 3, // STRING
+      required: false,
+    },
+  ];
+
+  const requestUpdateCommand = {
+    name: "request-update",
+    description: "Open a private channel to request an update to an existing file",
+    options: requestOptionSchema,
+  };
+
+  const requestNewCommand = {
+    name: "request-new",
+    description: "Open a private channel to request a new file be added",
+    options: requestOptionSchema,
+  };
+
+  const commands = [manifestCommand, requestUpdateCommand, requestNewCommand];
+
   try {
     if (GUILD_ID) {
       const guild = await client.guilds.fetch(GUILD_ID);
-      await guild.commands.set([command]);
-      console.log(`Registered /manifest command in guild ${GUILD_ID}`);
+      await guild.commands.set(commands);
+      console.log(`Registered commands in guild ${GUILD_ID}`);
     } else {
-      await client.application.commands.set([command]);
-      console.log("Registered /manifest command globally (may take up to an hour to appear)");
+      await client.application.commands.set(commands);
+      console.log("Registered commands globally (may take up to an hour to appear)");
     }
   } catch (err) {
-    console.error("Failed to register /manifest command:", err);
+    console.error("Failed to register commands:", err);
   }
 });
 client.login(DISCORD_BOT_TOKEN);
@@ -238,6 +268,73 @@ async function updateFileCountStatus() {
   }
 }
 
+// Creates a private text channel visible only to the requester (and anyone with
+// server-wide Administrator permission, who can see every channel regardless).
+async function createRequestChannel(interaction, kind) {
+  const guild = interaction.guild;
+  if (!guild) {
+    await interaction.reply({ content: "This command only works inside a server.", ephemeral: true });
+    return;
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+
+  const details = interaction.options.getString("details") || "No additional details provided.";
+  const label = kind === "update" ? "update" : "new-file";
+  const safeUsername = interaction.user.username
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .slice(0, 20);
+  const uniqueSuffix = Date.now().toString().slice(-4);
+  const channelName = `${label}-${safeUsername}-${uniqueSuffix}`;
+
+  try {
+    const channel = await guild.channels.create({
+      name: channelName,
+      type: ChannelType.GuildText,
+      topic: `${kind === "update" ? "Update" : "New file"} request from ${interaction.user.tag}`,
+      permissionOverwrites: [
+        {
+          id: guild.roles.everyone.id,
+          deny: [PermissionFlagsBits.ViewChannel],
+        },
+        {
+          id: interaction.user.id,
+          allow: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.ReadMessageHistory,
+            PermissionFlagsBits.AttachFiles,
+          ],
+        },
+        {
+          id: client.user.id,
+          allow: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.ManageChannels,
+          ],
+        },
+      ],
+    });
+
+    const heading =
+      kind === "update" ? "📦 **Update Request**" : "🆕 **New File Request**";
+
+    await channel.send(
+      `${heading}\nRequested by ${interaction.user}\n\n**Details:** ${details}\n\nAn admin will be with you shortly. Feel free to add more info or attachments here.`
+    );
+
+    await interaction.editReply({ content: `Created your private channel: ${channel}` });
+  } catch (err) {
+    console.error(`Error creating ${kind} request channel:`, err);
+    await interaction.editReply({
+      content:
+        "Couldn't create the channel — make sure the bot's role has the **Manage Channels** permission in this server.",
+    });
+  }
+}
+
 client.on("interactionCreate", async (interaction) => {
   if (interaction.isAutocomplete()) {
     if (interaction.commandName !== "manifest") return;
@@ -260,6 +357,16 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   if (!interaction.isChatInputCommand()) return;
+
+  if (interaction.commandName === "request-update") {
+    await createRequestChannel(interaction, "update");
+    return;
+  }
+  if (interaction.commandName === "request-new") {
+    await createRequestChannel(interaction, "new");
+    return;
+  }
+
   if (interaction.commandName !== "manifest") return;
 
   const query = interaction.options.getString("filename", true).trim().toLowerCase();
