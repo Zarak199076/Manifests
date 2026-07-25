@@ -365,8 +365,16 @@ async function setupStatsChannel() {
     // wipe stats/config back to defaults on every restart. (Same pattern already
     // used in cleanupOldRequestChannels below, just applied here too.)
     const channels = await guild.channels.fetch();
+    // NOTE: guild.channels.fetch() can return null entries for channels
+    // Discord.js can't fully resolve (some thread/forum/stage channels, or
+    // ones missing permission metadata). Without the `c &&` guard here, hitting
+    // one of those null entries throws inside .find(), which was being caught
+    // by the outer try/catch below and silently aborting this whole function —
+    // meaning the existing stats/config messages were never loaded, and
+    // manifestStats/botConfig just stayed at their in-memory defaults for that
+    // run. cleanupOldRequestChannels() already guarded against this; this did not.
     let channel = channels.find(
-      (c) => c.name === STATS_CHANNEL_NAME && c.type === ChannelType.GuildText
+      (c) => c && c.name === STATS_CHANNEL_NAME && c.type === ChannelType.GuildText
     );
 
     if (!channel) {
