@@ -22,7 +22,7 @@ const {
             // without it, global commands can take up to ~1 hour to show up everywhere
   IMAGE_FOLDER = "images", // folder to look in for a matching image (same base filename)
   TEXT_FOLDER = "info", // folder to look in for a matching .txt info file (same base filename)
-  STATS_FILE_PATH = ".manifest-bot/stats.json", // where pull counts are stored in the repo
+  STATS_CHANNEL_NAME = "manifest-data", // private channel used to store /manifest pull counts
 } = process.env;
 
 const required = {
@@ -52,7 +52,7 @@ client.once("ready", async () => {
   console.log(`Discord bot logged in as ${client.user.tag}`);
   discordReady = true;
   updateFileCountStatus();
-  await loadManifestStats();
+  await setupStatsChannel();
 
   const manifestCommand = {
     name: "manifest",
@@ -272,76 +272,88 @@ function formatDate(date) {
   return date.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 }
 
-// --- Pull-count stats, persisted as a JSON file committed into the watched repo ---
+// --- Pull-count stats, persisted in a message in a private Discord channel ---
 // (Railway's filesystem doesn't survive redeploys, so counting in-memory only
-// would reset every time the bot restarts.)
+// would reset every time the bot restarts. A message edit is cheap and instant —
+// no commit-history spam like writing to the repo would cause.)
 let manifestStats = {}; // { "terraria": 5, ... } keyed by lowercase name-without-extension
-let statsSha = null; // current file SHA, needed to update it via the GitHub API
-let statsDirty = false;
+let statsChannel = null;
+let statsMessage = null;
+const STATS_MARKER = "📊 Manifest pull-count data — do not delete this message";
 
-async function loadManifestStats() {
+function formatStatsMessage() {
+  return `${STATS_MARKER}\n\`\`\`json\n${JSON.stringify(manifestStats, null, 2)}\n\`\`\``;
+}
+
+async function setupStatsChannel() {
   try {
-    const url = `https://api.github.com/repos/${GITHUB_REPO}/contents/${encodeURI(
-      STATS_FILE_PATH
-    )}?ref=${BRANCH}`;
-    const headers = { Accept: "application/vnd.github+json" };
-    if (GITHUB_TOKEN) headers.Authorization = `Bearer ${GITHUB_TOKEN}`;
-
-    const res = await fetch(url, { headers });
-    if (res.status === 404) {
-      manifestStats = {};
-      statsSha = null;
-      console.log("No existing pull-stats file yet — starting fresh");
+    let guild;
+    if (GUILD_ID) {
+      guild = await client.guilds.fetch(GUILD_ID);
+    } else if (client.guilds.cache.size === 1) {
+      guild = client.guilds.cache.first();
+    } else {
+      console.warn(
+        "Can't tell which server to store stats in (bot is in multiple servers) — set GUILD_ID."
+      );
       return;
     }
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-    const data = await res.json();
-    statsSha = data.sha;
-    manifestStats = JSON.parse(Buffer.from(data.content, "base64").toString("utf-8"));
-    console.log(`Loaded pull stats for ${Object.keys(manifestStats).length} file(s)`);
+    let channel = guild.channels.cache.find(
+      (c) => c.name === STATS_CHANNEL_NAME && c.type === ChannelType.GuildText
+    );
+
+    if (!channel) {
+      channel = await guild.channels.create({
+        name: STATS_CHANNEL_NAME,
+        type: ChannelType.GuildText,
+        topic: "Bot-only storage for /manifest pull-count stats. Don't delete the pinned message here.",
+        permissionOverwrites: [
+          { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+          {
+            id: client.user.id,
+            allow: [
+              PermissionFlagsBits.ViewChannel,
+              PermissionFlagsBits.SendMessages,
+              PermissionFlagsBits.ReadMessageHistory,
+            ],
+          },
+        ],
+      });
+      console.log(`Created stats channel #${channel.name}`);
+    }
+    statsChannel = channel;
+
+    const recent = await channel.messages.fetch({ limit: 20 });
+    const existing = recent.find((m) => m.author.id === client.user.id && m.content.startsWith(STATS_MARKER));
+
+    if (existing) {
+      statsMessage = existing;
+      const jsonText = existing.content.replace(STATS_MARKER, "").replace(/```json\n?|\n?```/g, "").trim();
+      try {
+        manifestStats = JSON.parse(jsonText || "{}");
+      } catch {
+        manifestStats = {};
+      }
+      console.log(`Loaded pull stats for ${Object.keys(manifestStats).length} file(s)`);
+    } else {
+      manifestStats = {};
+      statsMessage = await channel.send(formatStatsMessage());
+      console.log("Created new stats message");
+    }
   } catch (err) {
-    console.error("Error loading manifest stats:", err);
-    manifestStats = {};
+    console.error("Error setting up stats channel:", err);
   }
 }
 
 async function saveManifestStats() {
-  if (!GITHUB_TOKEN) {
-    console.warn("GITHUB_TOKEN not set — pull counts will reset on next deploy");
-    return;
-  }
+  if (!statsMessage) return;
   try {
-    const body = {
-      message: "Update manifest pull stats",
-      content: Buffer.from(JSON.stringify(manifestStats, null, 2)).toString("base64"),
-      branch: BRANCH,
-    };
-    if (statsSha) body.sha = statsSha;
-
-    const url = `https://api.github.com/repos/${GITHUB_REPO}/contents/${encodeURI(STATS_FILE_PATH)}`;
-    const res = await fetch(url, {
-      method: "PUT",
-      headers: {
-        Accept: "application/vnd.github+json",
-        Authorization: `Bearer ${GITHUB_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      // Likely a stale SHA (someone/something else wrote in the meantime) — reload and retry once.
-      if (res.status === 409 || res.status === 422) {
-        await loadManifestStats();
-        return;
-      }
-      throw new Error(`HTTP ${res.status}`);
+    const content = formatStatsMessage();
+    if (content.length > 2000) {
+      console.warn("Stats message is approaching Discord's 2000-char limit — consider trimming old entries.");
     }
-
-    const data = await res.json();
-    statsSha = data.content?.sha ?? statsSha;
-    statsDirty = false;
+    await statsMessage.edit(content.slice(0, 2000));
   } catch (err) {
     console.error("Error saving manifest stats:", err);
   }
@@ -350,17 +362,12 @@ async function saveManifestStats() {
 function recordManifestPull(nameWithoutExt) {
   const key = nameWithoutExt.toLowerCase();
   manifestStats[key] = (manifestStats[key] || 0) + 1;
-  statsDirty = true;
+  saveManifestStats(); // fire-and-forget so it doesn't slow down the reply
 }
 
 function getPullCount(nameWithoutExt) {
   return manifestStats[nameWithoutExt.toLowerCase()] || 0;
 }
-
-// Batches writes instead of committing to GitHub on every single /manifest call
-setInterval(() => {
-  if (statsDirty) saveManifestStats();
-}, 2 * 60 * 1000);
 
 async function updateFileCountStatus() {
   try {
