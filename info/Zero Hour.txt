@@ -1,0 +1,4 @@
+Description = "Zero Hour is a tactical FPS with online team-based game play that takes place in a variety of fictional locations interpreted in Bangladesh with Real-life scale &amp; resource management. It brings a grounded, close quarter combat experience to the game."
+app_id = "1359090"
+Price = "$9.99"
+Developer = "AttritoM7 Productions"
