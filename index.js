@@ -89,7 +89,29 @@ client.once("ready", async () => {
     options: requestOptionSchema,
   };
 
-  const commands = [manifestCommand, requestUpdateCommand, requestNewCommand];
+  const botSetupCommand = {
+    name: "bot-setup",
+    description: "Configure bot settings",
+    default_member_permissions: PermissionFlagsBits.ManageGuild.toString(),
+    options: [
+      {
+        name: "manifest-channel",
+        description: "Set which channel /manifest can be used in",
+        type: 1, // SUB_COMMAND
+        options: [
+          {
+            name: "channel",
+            description: "The channel to restrict /manifest to",
+            type: 7, // CHANNEL
+            required: true,
+            channel_types: [ChannelType.GuildText],
+          },
+        ],
+      },
+    ],
+  };
+
+  const commands = [manifestCommand, requestUpdateCommand, requestNewCommand, botSetupCommand];
 
   try {
     if (GUILD_ID) {
@@ -285,6 +307,16 @@ function formatStatsMessage() {
   return `${STATS_MARKER}\n\`\`\`json\n${JSON.stringify(manifestStats, null, 2)}\n\`\`\``;
 }
 
+// --- Bot config, stored the same way (a message in the same private channel).
+// Add new settings here as they come up — same pattern as manifestChannelId.
+let botConfig = { manifestChannelId: null };
+let configMessage = null;
+const CONFIG_MARKER = "⚙️ Bot config data — do not delete this message";
+
+function formatConfigMessage() {
+  return `${CONFIG_MARKER}\n\`\`\`json\n${JSON.stringify(botConfig, null, 2)}\n\`\`\``;
+}
+
 async function setupStatsChannel() {
   try {
     let guild;
@@ -294,7 +326,7 @@ async function setupStatsChannel() {
       guild = client.guilds.cache.first();
     } else {
       console.warn(
-        "Can't tell which server to store stats in (bot is in multiple servers) — set GUILD_ID."
+        "Can't tell which server to store bot data in (bot is in multiple servers) — set GUILD_ID."
       );
       return;
     }
@@ -307,7 +339,7 @@ async function setupStatsChannel() {
       channel = await guild.channels.create({
         name: STATS_CHANNEL_NAME,
         type: ChannelType.GuildText,
-        topic: "Bot-only storage for /manifest pull-count stats. Don't delete the pinned message here.",
+        topic: "Bot-only storage for pull-count stats and settings. Don't delete the messages here.",
         permissionOverwrites: [
           { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
           {
@@ -320,16 +352,16 @@ async function setupStatsChannel() {
           },
         ],
       });
-      console.log(`Created stats channel #${channel.name}`);
+      console.log(`Created stats/config channel #${channel.name}`);
     }
     statsChannel = channel;
 
     const recent = await channel.messages.fetch({ limit: 20 });
-    const existing = recent.find((m) => m.author.id === client.user.id && m.content.startsWith(STATS_MARKER));
 
-    if (existing) {
-      statsMessage = existing;
-      const jsonText = existing.content.replace(STATS_MARKER, "").replace(/```json\n?|\n?```/g, "").trim();
+    const existingStats = recent.find((m) => m.author.id === client.user.id && m.content.startsWith(STATS_MARKER));
+    if (existingStats) {
+      statsMessage = existingStats;
+      const jsonText = existingStats.content.replace(STATS_MARKER, "").replace(/```json\n?|\n?```/g, "").trim();
       try {
         manifestStats = JSON.parse(jsonText || "{}");
       } catch {
@@ -341,8 +373,24 @@ async function setupStatsChannel() {
       statsMessage = await channel.send(formatStatsMessage());
       console.log("Created new stats message");
     }
+
+    const existingConfig = recent.find((m) => m.author.id === client.user.id && m.content.startsWith(CONFIG_MARKER));
+    if (existingConfig) {
+      configMessage = existingConfig;
+      const jsonText = existingConfig.content.replace(CONFIG_MARKER, "").replace(/```json\n?|\n?```/g, "").trim();
+      try {
+        botConfig = { manifestChannelId: null, ...JSON.parse(jsonText || "{}") };
+      } catch {
+        botConfig = { manifestChannelId: null };
+      }
+      console.log("Loaded bot config");
+    } else {
+      botConfig = { manifestChannelId: null };
+      configMessage = await channel.send(formatConfigMessage());
+      console.log("Created new config message");
+    }
   } catch (err) {
-    console.error("Error setting up stats channel:", err);
+    console.error("Error setting up stats/config channel:", err);
   }
 }
 
@@ -356,6 +404,15 @@ async function saveManifestStats() {
     await statsMessage.edit(content.slice(0, 2000));
   } catch (err) {
     console.error("Error saving manifest stats:", err);
+  }
+}
+
+async function saveBotConfig() {
+  if (!configMessage) return;
+  try {
+    await configMessage.edit(formatConfigMessage());
+  } catch (err) {
+    console.error("Error saving bot config:", err);
   }
 }
 
@@ -481,7 +538,32 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
+  if (interaction.commandName === "bot-setup") {
+    if (!interaction.guild) {
+      await interaction.reply({ content: "This command only works inside a server.", ephemeral: true });
+      return;
+    }
+    if (interaction.options.getSubcommand() === "manifest-channel") {
+      const channel = interaction.options.getChannel("channel", true);
+      botConfig.manifestChannelId = channel.id;
+      await saveBotConfig();
+      await interaction.reply({
+        content: `\`/manifest\` can now only be used in ${channel}.`,
+        ephemeral: true,
+      });
+    }
+    return;
+  }
+
   if (interaction.commandName !== "manifest") return;
+
+  if (botConfig.manifestChannelId && interaction.channelId !== botConfig.manifestChannelId) {
+    await interaction.reply({
+      content: `\`/manifest\` can only be used in <#${botConfig.manifestChannelId}>.`,
+      ephemeral: true,
+    });
+    return;
+  }
 
   const query = interaction.options.getString("filename", true).trim().toLowerCase();
   await interaction.deferReply();
