@@ -1,0 +1,4 @@
+Description = "A sci-fi colony sim driven by an intelligent AI storyteller. Generates stories by simulating psychology, ecology, gunplay, melee combat, climate, biomes, diplomacy, interpersonal relationships, art, medicine, trade, and more."
+app_id = "294100"
+Price = "$34.99"
+Developer = "Ludeon Studios"
