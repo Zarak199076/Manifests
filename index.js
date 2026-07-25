@@ -174,6 +174,27 @@ client.once("ready", async () => {
     ],
   };
 
+  const resetStatsCommand = {
+    name: "reset-stats",
+    description: "Reset manifest pull-count stats — one file, or everything",
+    default_member_permissions: PermissionFlagsBits.Administrator.toString(),
+    options: [
+      {
+        name: "filename",
+        description: "Reset just this file's count (autocomplete). Omit to reset everything.",
+        type: 3, // STRING
+        required: false,
+        autocomplete: true,
+      },
+      {
+        name: "confirm",
+        description: "Set true to confirm wiping ALL counts (required when filename is omitted)",
+        type: 5, // BOOLEAN
+        required: false,
+      },
+    ],
+  };
+
   const commands = [
     manifestCommand,
     requestUpdateCommand,
@@ -181,6 +202,7 @@ client.once("ready", async () => {
     botSetupCommand,
     uploadAssetsCommand,
     steamImportCommand,
+    resetStatsCommand,
   ];
 
   try {
@@ -975,7 +997,7 @@ async function handleSteamImport(interaction) {
 
 client.on("interactionCreate", async (interaction) => {
   if (interaction.isAutocomplete()) {
-    if (interaction.commandName !== "manifest") return;
+    if (interaction.commandName !== "manifest" && interaction.commandName !== "reset-stats") return;
     const focused = interaction.options.getFocused().toLowerCase();
 
     const choices = folderFilesCache
@@ -1046,6 +1068,66 @@ client.on("interactionCreate", async (interaction) => {
         : "Support role cleared — only the requester (and admins) will see new request channels.";
       await interaction.reply({ content: message, ephemeral: true });
     }
+    return;
+  }
+
+  if (interaction.commandName === "reset-stats") {
+    const filename = interaction.options.getString("filename");
+    const confirmAll = interaction.options.getBoolean("confirm") ?? false;
+
+    // No filename given — this is a full wipe, so require an explicit confirm:true
+    // rather than acting on the first call. Same "ask again to be sure" idea as a
+    // confirmation dialog, just done with a boolean flag since this file doesn't
+    // use message components anywhere else.
+    if (!filename) {
+      if (!confirmAll) {
+        await interaction.reply({
+          content:
+            "This wipes pull counts for **every** file. Run again with `confirm:true` to go through with it, or pass `filename` to reset just one.",
+          ephemeral: true,
+        });
+        return;
+      }
+      const clearedCount = Object.keys(manifestStats).length;
+      manifestStats = {};
+      await saveManifestStats();
+      await interaction.reply({
+        content: `Reset pull counts for all ${clearedCount} file(s).`,
+        ephemeral: true,
+      });
+      return;
+    }
+
+    // Same exact-then-partial matching as /manifest, so this finds the same file
+    // /manifest would for the same query.
+    const query = filename.trim().toLowerCase();
+    const exact = folderFilesCache.filter((f) => stripExtension(f.name).toLowerCase() === query);
+    const matches = exact.length > 0
+      ? exact
+      : folderFilesCache.filter((f) => stripExtension(f.name).toLowerCase().includes(query));
+
+    if (matches.length === 0) {
+      await interaction.reply({ content: `No file matching **${filename}** found.`, ephemeral: true });
+      return;
+    }
+    if (matches.length > 1) {
+      const names = matches.slice(0, 20).map((f) => `• ${stripExtension(f.name)}`);
+      await interaction.reply({
+        content: `Found ${matches.length} matches — be more specific:\n${names.join("\n")}`,
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const nameWithoutExt = stripExtension(matches[0].name);
+    const key = nameWithoutExt.toLowerCase();
+    const oldCount = manifestStats[key] || 0;
+    delete manifestStats[key];
+    await saveManifestStats();
+    await interaction.reply({
+      content: `Reset **${nameWithoutExt}** — pull count was ${oldCount}, now 0.`,
+      ephemeral: true,
+    });
     return;
   }
 
