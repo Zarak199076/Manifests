@@ -1,0 +1,4 @@
+Description = "The &quot;Perpetual Testing Initiative&quot; has been expanded to allow you to design co-op puzzles for you and your friends!"
+app_id = "620"
+Price = "$9.99"
+Developer = "Valve"
