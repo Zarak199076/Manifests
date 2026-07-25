@@ -1,0 +1,4 @@
+Description = "Only the world’s most ruthless Warden can contain the world’s most ruthless inmates. Design and develop your personalized penitentiary in Prison Architect."
+app_id = "233450"
+Price = "$29.99"
+Developer = "Introversion Software, Double Eleven"
