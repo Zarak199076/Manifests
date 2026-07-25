@@ -1,0 +1,4 @@
+Description = "Join a world where you design, create and pilot your own air sea rescue service. Release your inner hero as you battle fierce storms out at sea to rescue those in need."
+app_id = "573090"
+Price = "$24.99"
+Developer = "Geometa"
