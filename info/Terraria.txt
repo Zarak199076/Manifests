@@ -1,4 +1,4 @@
 Description = "Dig, fight, explore, build! Nothing is impossible."
+app_id = "105600"
 Price = "$9.99"
 Developer = "Re-Logic"
-Last Updated = "January 27, 2026"
