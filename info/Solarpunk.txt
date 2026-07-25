@@ -1,0 +1,4 @@
+Description = "Solarpunk is a survival game in a technologically advanced world of floating islands. Alone or together with your friends, you can construct buildings, grow food, craft gadgets and hop on your airship to explore distant islands in the sky."
+app_id = "1805110"
+Price = "$18.39"
+Developer = "Cyberwave"
