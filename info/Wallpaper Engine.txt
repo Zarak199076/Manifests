@@ -1,0 +1,4 @@
+Description = "Use stunning live wallpapers on your desktop. Animate your own images to create new wallpapers or import videos/websites and share them on the Steam Workshop!"
+app_id = "431960"
+Price = "$4.99"
+Developer = "Wallpaper Engine Team"
