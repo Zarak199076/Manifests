@@ -1,5 +1,6 @@
 import express from "express";
 import crypto from "crypto";
+import AdmZip from "adm-zip";
 import {
   Client,
   GatewayIntentBits,
@@ -139,7 +140,27 @@ client.once("ready", async () => {
     ],
   };
 
-  const commands = [manifestCommand, requestUpdateCommand, requestNewCommand, botSetupCommand];
+  const uploadAssetsCommand = {
+    name: "upload-assets",
+    description: "Upload a zip of images/info files — sorts them into the right folders automatically",
+    default_member_permissions: PermissionFlagsBits.Administrator.toString(),
+    options: [
+      {
+        name: "file",
+        description: "A .zip containing images and/or .txt info files",
+        type: 11, // ATTACHMENT
+        required: true,
+      },
+    ],
+  };
+
+  const commands = [
+    manifestCommand,
+    requestUpdateCommand,
+    requestNewCommand,
+    botSetupCommand,
+    uploadAssetsCommand,
+  ];
 
   try {
     if (GUILD_ID) {
@@ -629,6 +650,130 @@ async function createRequestChannel(interaction, kind) {
   }
 }
 
+// Creates or updates a single file in the repo via the GitHub Contents API.
+// Requires GITHUB_TOKEN to have write access to GITHUB_REPO.
+async function commitFileToRepo(path, buffer) {
+  const url = `https://api.github.com/repos/${GITHUB_REPO}/contents/${encodeURI(path)}`;
+  const headers = {
+    Accept: "application/vnd.github+json",
+    Authorization: `Bearer ${GITHUB_TOKEN}`,
+  };
+
+  // Look up the existing file's sha first — required by the API to overwrite
+  // a file that's already there; omitted entirely when creating a new one.
+  let sha;
+  const existingRes = await fetch(`${url}?ref=${BRANCH}`, { headers });
+  if (existingRes.ok) {
+    const existing = await existingRes.json();
+    sha = existing.sha;
+  }
+
+  const body = {
+    message: `Add/update ${path} via /upload-assets`,
+    content: buffer.toString("base64"),
+    branch: BRANCH,
+  };
+  if (sha) body.sha = sha;
+
+  const putRes = await fetch(url, {
+    method: "PUT",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!putRes.ok) {
+    const errText = await putRes.text();
+    throw new Error(`GitHub API HTTP ${putRes.status}: ${errText}`);
+  }
+}
+
+const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
+const MAX_ZIP_ENTRIES = 50; // keep each upload reasonably sized — one GitHub commit per file
+
+async function handleUploadAssets(interaction) {
+  if (!GITHUB_TOKEN) {
+    await interaction.reply({
+      content:
+        "This command needs `GITHUB_TOKEN` set with write access to the repo first — see the README.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const attachment = interaction.options.getAttachment("file", true);
+  if (!attachment.name?.toLowerCase().endsWith(".zip")) {
+    await interaction.reply({ content: "Please attach a `.zip` file.", ephemeral: true });
+    return;
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+
+  try {
+    const res = await fetch(attachment.url);
+    if (!res.ok) throw new Error(`Failed to download attachment (HTTP ${res.status})`);
+    const buffer = Buffer.from(await res.arrayBuffer());
+
+    let zip;
+    try {
+      zip = new AdmZip(buffer);
+    } catch (err) {
+      await interaction.editReply("Couldn't read that as a zip file — make sure it's not corrupted.");
+      return;
+    }
+
+    const entries = zip.getEntries().filter((e) => !e.isDirectory);
+    if (entries.length === 0) {
+      await interaction.editReply("That zip is empty.");
+      return;
+    }
+    if (entries.length > MAX_ZIP_ENTRIES) {
+      await interaction.editReply(
+        `That zip has ${entries.length} files — please keep uploads under ${MAX_ZIP_ENTRIES} at a time.`
+      );
+      return;
+    }
+
+    const uploadedImages = [];
+    const uploadedInfo = [];
+    const skipped = [];
+
+    for (const entry of entries) {
+      const baseName = entry.entryName.split("/").pop(); // flatten any folder structure in the zip
+      const dotIndex = baseName.lastIndexOf(".");
+      const ext = dotIndex >= 0 ? baseName.slice(dotIndex).toLowerCase() : "";
+
+      let targetFolder = null;
+      if (IMAGE_EXTENSIONS.includes(ext)) targetFolder = normalizedImageFolder;
+      else if (ext === ".txt") targetFolder = normalizedTextFolder;
+
+      if (!targetFolder || !baseName) {
+        skipped.push(baseName || entry.entryName);
+        continue;
+      }
+
+      try {
+        await commitFileToRepo(`${targetFolder}/${baseName}`, entry.getData());
+        if (targetFolder === normalizedImageFolder) uploadedImages.push(baseName);
+        else uploadedInfo.push(baseName);
+      } catch (err) {
+        console.error(`Failed to commit ${baseName}:`, err);
+        skipped.push(`${baseName} (upload failed)`);
+      }
+    }
+
+    const lines = [];
+    if (uploadedImages.length) lines.push(`**Images (${uploadedImages.length}):** ${uploadedImages.join(", ")}`);
+    if (uploadedInfo.length) lines.push(`**Info files (${uploadedInfo.length}):** ${uploadedInfo.join(", ")}`);
+    if (skipped.length) lines.push(`**Skipped (${skipped.length}):** ${skipped.join(", ")}`);
+    if (lines.length === 0) lines.push("Nothing usable found in that zip.");
+
+    await interaction.editReply(lines.join("\n").slice(0, 2000));
+  } catch (err) {
+    console.error("Error handling /upload-assets:", err);
+    await interaction.editReply("Something went wrong processing that zip — try again in a bit.");
+  }
+}
+
 client.on("interactionCreate", async (interaction) => {
   if (interaction.isAutocomplete()) {
     if (interaction.commandName !== "manifest") return;
@@ -658,6 +803,11 @@ client.on("interactionCreate", async (interaction) => {
   }
   if (interaction.commandName === "request-new") {
     await createRequestChannel(interaction, "new");
+    return;
+  }
+
+  if (interaction.commandName === "upload-assets") {
+    await handleUploadAssets(interaction);
     return;
   }
 
