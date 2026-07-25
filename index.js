@@ -53,6 +53,7 @@ client.once("ready", async () => {
   discordReady = true;
   updateFileCountStatus();
   await setupStatsChannel();
+  cleanupOldRequestChannels();
 
   const manifestCommand = {
     name: "manifest",
@@ -92,7 +93,7 @@ client.once("ready", async () => {
   const botSetupCommand = {
     name: "bot-setup",
     description: "Configure bot settings",
-    default_member_permissions: PermissionFlagsBits.ManageGuild.toString(),
+    default_member_permissions: PermissionFlagsBits.Administrator.toString(),
     options: [
       {
         name: "manifest-channel",
@@ -105,6 +106,20 @@ client.once("ready", async () => {
             type: 7, // CHANNEL
             required: true,
             channel_types: [ChannelType.GuildText],
+          },
+        ],
+      },
+      {
+        name: "request-cleanup",
+        description: "Auto-delete request channels a set number of hours after they're created",
+        type: 1, // SUB_COMMAND
+        options: [
+          {
+            name: "hours",
+            description: "Hours after creation to delete request channels (0 disables this)",
+            type: 4, // INTEGER
+            required: true,
+            min_value: 0,
           },
         ],
       },
@@ -309,7 +324,7 @@ function formatStatsMessage() {
 
 // --- Bot config, stored the same way (a message in the same private channel).
 // Add new settings here as they come up — same pattern as manifestChannelId.
-let botConfig = { manifestChannelId: null };
+let botConfig = { manifestChannelId: null, requestCleanupHours: null };
 let configMessage = null;
 const CONFIG_MARKER = "⚙️ Bot config data — do not delete this message";
 
@@ -379,13 +394,13 @@ async function setupStatsChannel() {
       configMessage = existingConfig;
       const jsonText = existingConfig.content.replace(CONFIG_MARKER, "").replace(/```json\n?|\n?```/g, "").trim();
       try {
-        botConfig = { manifestChannelId: null, ...JSON.parse(jsonText || "{}") };
+        botConfig = { manifestChannelId: null, requestCleanupHours: null, ...JSON.parse(jsonText || "{}") };
       } catch {
-        botConfig = { manifestChannelId: null };
+        botConfig = { manifestChannelId: null, requestCleanupHours: null };
       }
       console.log("Loaded bot config");
     } else {
-      botConfig = { manifestChannelId: null };
+      botConfig = { manifestChannelId: null, requestCleanupHours: null };
       configMessage = await channel.send(formatConfigMessage());
       console.log("Created new config message");
     }
@@ -425,6 +440,50 @@ function recordManifestPull(nameWithoutExt) {
 function getPullCount(nameWithoutExt) {
   return manifestStats[nameWithoutExt.toLowerCase()] || 0;
 }
+
+// Request channels are identified by the topic set when they're created (see
+// createRequestChannel below) — no separate tracking needed, and channel.createdTimestamp
+// (built into every Discord channel/snowflake) gives us its age for free.
+async function cleanupOldRequestChannels() {
+  if (!botConfig.requestCleanupHours) return; // null/0 = disabled
+
+  try {
+    let guild;
+    if (GUILD_ID) {
+      guild = await client.guilds.fetch(GUILD_ID);
+    } else if (client.guilds.cache.size === 1) {
+      guild = client.guilds.cache.first();
+    } else {
+      return; // ambiguous which server — setupStatsChannel already warned about this
+    }
+
+    const channels = await guild.channels.fetch();
+    const cutoffMs = botConfig.requestCleanupHours * 60 * 60 * 1000;
+    const now = Date.now();
+
+    for (const channel of channels.values()) {
+      if (!channel || channel.type !== ChannelType.GuildText || !channel.topic) continue;
+      const isRequestChannel =
+        channel.topic.startsWith("Update request from") || channel.topic.startsWith("New file request from");
+      if (!isRequestChannel) continue;
+
+      const age = now - channel.createdTimestamp;
+      if (age >= cutoffMs) {
+        try {
+          await channel.delete("Auto-deleted: past the configured request-cleanup period");
+          console.log(`Auto-deleted expired request channel #${channel.name}`);
+        } catch (err) {
+          console.error(`Failed to auto-delete #${channel.name}:`, err);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Error running request-channel cleanup:", err);
+  }
+}
+
+// Check every 15 minutes — fine-grained enough without hammering the API
+setInterval(cleanupOldRequestChannels, 15 * 60 * 1000);
 
 async function updateFileCountStatus() {
   try {
@@ -551,6 +610,15 @@ client.on("interactionCreate", async (interaction) => {
         content: `\`/manifest\` can now only be used in ${channel}.`,
         ephemeral: true,
       });
+    } else if (interaction.options.getSubcommand() === "request-cleanup") {
+      const hours = interaction.options.getInteger("hours", true);
+      botConfig.requestCleanupHours = hours > 0 ? hours : null;
+      await saveBotConfig();
+      const message =
+        hours > 0
+          ? `Request channels will now be auto-deleted ${hours} hour(s) after they're created.`
+          : "Auto-delete for request channels has been turned off.";
+      await interaction.reply({ content: message, ephemeral: true });
     }
     return;
   }
