@@ -151,6 +151,12 @@ client.once("ready", async () => {
         type: 11, // ATTACHMENT
         required: true,
       },
+      {
+        name: "game",
+        description: "If true, uploads this zip as-is into the games folder instead of extracting it",
+        type: 5, // BOOLEAN
+        required: false,
+      },
     ],
   };
 
@@ -716,6 +722,8 @@ async function handleUploadAssets(interaction) {
   }
 
   const attachment = interaction.options.getAttachment("file", true);
+  const isGame = interaction.options.getBoolean("game") ?? false;
+
   if (!attachment.name?.toLowerCase().endsWith(".zip")) {
     await interaction.reply({ content: "Please attach a `.zip` file.", ephemeral: true });
     return;
@@ -727,6 +735,19 @@ async function handleUploadAssets(interaction) {
     const res = await fetch(attachment.url);
     if (!res.ok) throw new Error(`Failed to download attachment (HTTP ${res.status})`);
     const buffer = Buffer.from(await res.arrayBuffer());
+
+    if (isGame) {
+      // Upload as-is into the games folder — no extraction. Since this commits through
+      // the same GitHub API push that a normal git push would, the existing webhook
+      // picks it up automatically and posts the [filename](link) message on its own —
+      // no need to duplicate that announcement here.
+      await commitFileToRepo(`${normalizedFolder}/${attachment.name}`, buffer);
+      await interaction.editReply(
+        `Added \`${attachment.name}\` to \`${normalizedFolder}\`. It'll show up in the Discord ` +
+          `channel shortly once GitHub processes the push, and \`/manifest\` will pick it up automatically.`
+      );
+      return;
+    }
 
     let zip;
     try {
