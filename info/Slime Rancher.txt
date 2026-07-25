@@ -1,0 +1,4 @@
+Description = "Slime Rancher is the tale of Beatrix LeBeau, a plucky, young rancher who sets out for a life a thousand light years away from Earth on the ‘Far, Far Range’ where she tries her hand at making a living wrangling slimes."
+app_id = "433340"
+Price = "$4.99"
+Developer = "Monomi Park"
