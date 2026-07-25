@@ -154,12 +154,27 @@ client.once("ready", async () => {
     ],
   };
 
+  const steamImportCommand = {
+    name: "steam-import",
+    description: "Fetch a Steam game's header image + info and add them to the image/info folders",
+    default_member_permissions: PermissionFlagsBits.Administrator.toString(),
+    options: [
+      {
+        name: "app_id",
+        description: "The Steam App ID, e.g. 105600 for Terraria",
+        type: 4, // INTEGER
+        required: true,
+      },
+    ],
+  };
+
   const commands = [
     manifestCommand,
     requestUpdateCommand,
     requestNewCommand,
     botSetupCommand,
     uploadAssetsCommand,
+    steamImportCommand,
   ];
 
   try {
@@ -774,6 +789,91 @@ async function handleUploadAssets(interaction) {
   }
 }
 
+// Uses Steam's official Store API rather than scraping SteamDB's page directly —
+// SteamDB itself pulls this same header image from Steam's own CDN, so the result
+// is identical either way, but the official API is public, stable, and won't get
+// blocked the way scraping a third-party site's HTML tends to over time.
+async function fetchSteamAppDetails(appId) {
+  const url = `https://store.steampowered.com/api/appdetails?appids=${appId}&cc=us&l=en`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Steam API HTTP ${res.status}`);
+  const json = await res.json();
+  const entry = json[String(appId)];
+  if (!entry || !entry.success) return null;
+  return entry.data;
+}
+
+// Strips characters that aren't safe in a filename/GitHub path, but leaves spaces alone.
+function sanitizeFilename(name) {
+  return name.replace(/[\\/:*?"<>|]/g, "").trim();
+}
+
+// Keeps a value safe to sit inside the `Key = "value"` format the info .txt files use —
+// mainly making sure a stray " in a game's description can't break the quoted field.
+function sanitizeForQuotedField(text) {
+  return (text || "").replace(/"/g, "'").replace(/\s+/g, " ").trim();
+}
+
+async function handleSteamImport(interaction) {
+  if (!GITHUB_TOKEN) {
+    await interaction.reply({
+      content:
+        "This command needs `GITHUB_TOKEN` set with write access to the repo first — see the README.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const appId = interaction.options.getInteger("app_id", true);
+  await interaction.deferReply({ ephemeral: true });
+
+  try {
+    const data = await fetchSteamAppDetails(appId);
+    if (!data) {
+      await interaction.editReply(
+        `Couldn't find a Steam app with ID \`${appId}\` (or it's not available/visible in the US store).`
+      );
+      return;
+    }
+
+    if (!data.header_image) {
+      await interaction.editReply(`Found **${data.name}**, but it doesn't have a header image available.`);
+      return;
+    }
+
+    const gameName = sanitizeFilename(data.name || `app-${appId}`);
+
+    const imgRes = await fetch(data.header_image);
+    if (!imgRes.ok) throw new Error(`Failed to download header image (HTTP ${imgRes.status})`);
+    const imageBuffer = Buffer.from(await imgRes.arrayBuffer());
+
+    const price = data.is_free ? "Free" : data.price_overview?.final_formatted || "N/A";
+    const developer = data.developers?.length ? data.developers.join(", ") : "Unknown";
+    const description = sanitizeForQuotedField(data.short_description);
+
+    const infoText = [
+      `Description = "${description}"`,
+      `app_id = "${appId}"`,
+      `Price = "${price}"`,
+      `Developer = "${developer}"`,
+    ].join("\n");
+
+    await commitFileToRepo(`${normalizedImageFolder}/${gameName}.png`, imageBuffer);
+    await commitFileToRepo(`${normalizedTextFolder}/${gameName}.txt`, Buffer.from(infoText, "utf-8"));
+
+    await interaction.editReply(
+      `Added **${data.name}**:\n` +
+        `• \`${normalizedImageFolder}/${gameName}.png\`\n` +
+        `• \`${normalizedTextFolder}/${gameName}.txt\`\n\n` +
+        `Note: Steam serves this header image as an actual JPEG even though it's named \`.png\` — ` +
+        `that's Steam's own convention, and it still displays fine everywhere (Discord embeds, browsers, etc).`
+    );
+  } catch (err) {
+    console.error("Error handling /steam-import:", err);
+    await interaction.editReply("Something went wrong fetching that game — try again in a bit.");
+  }
+}
+
 client.on("interactionCreate", async (interaction) => {
   if (interaction.isAutocomplete()) {
     if (interaction.commandName !== "manifest") return;
@@ -808,6 +908,11 @@ client.on("interactionCreate", async (interaction) => {
 
   if (interaction.commandName === "upload-assets") {
     await handleUploadAssets(interaction);
+    return;
+  }
+
+  if (interaction.commandName === "steam-import") {
+    await handleSteamImport(interaction);
     return;
   }
 
