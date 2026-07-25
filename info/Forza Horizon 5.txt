@@ -1,0 +1,4 @@
+Description = "Explore the vibrant open world landscapes of Mexico with limitless, fun driving action in the world’s greatest cars."
+app_id = "1551360"
+Price = "$59.99"
+Developer = "Playground Games"
