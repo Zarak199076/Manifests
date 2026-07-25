@@ -1,0 +1,4 @@
+Description = "Discover the breathtaking landscapes of Japan in over 550 real-world cars and become a racing Legend in Forza Horizon's biggest open world driving adventure yet."
+app_id = "2483190"
+Price = "$69.99"
+Developer = "Playground Games"
