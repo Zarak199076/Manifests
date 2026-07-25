@@ -403,10 +403,22 @@ async function setupStatsChannel() {
     const existingStats = recent.find((m) => m.author.id === client.user.id && m.content.startsWith(STATS_MARKER));
     if (existingStats) {
       statsMessage = existingStats;
-      const jsonText = existingStats.content.replace(STATS_MARKER, "").replace(/```json\n?|\n?```/g, "").trim();
+      // Pull whatever sits between the ```json fence markers directly, instead of
+      // stripping the fences with two separate regex replaces. The old approach
+      // (`.replace(STATS_MARKER, "").replace(/```json\n?|\n?```/g, "")`) had a bug:
+      // right after the marker is stripped, the string starts with "\n```json\n{...".
+      // At that position the regex's SECOND alternative (\n?```) matched the leading
+      // "\n```" before the FIRST alternative (```json\n?) ever got a chance to — regex
+      // alternation commits to whichever branch matches first, it doesn't look ahead —
+      // leaving the literal word "json" stuck in front of the real JSON. JSON.parse
+      // then threw on every single load, silently caught below with no logging, and
+      // reset to {}. Saving was never affected (it doesn't re-parse anything), only
+      // the read-back after a restart — exactly the "saves fine, resets on deploy" bug.
+      const fenceMatch = existingStats.content.match(/```json\n([\s\S]*?)\n```/);
       try {
-        manifestStats = JSON.parse(jsonText || "{}");
-      } catch {
+        manifestStats = JSON.parse(fenceMatch ? fenceMatch[1] : "{}");
+      } catch (err) {
+        console.error("Failed to parse existing stats message, resetting to empty:", err);
         manifestStats = {};
       }
       console.log(`Loaded pull stats for ${Object.keys(manifestStats).length} file(s)`);
@@ -419,15 +431,19 @@ async function setupStatsChannel() {
     const existingConfig = recent.find((m) => m.author.id === client.user.id && m.content.startsWith(CONFIG_MARKER));
     if (existingConfig) {
       configMessage = existingConfig;
-      const jsonText = existingConfig.content.replace(CONFIG_MARKER, "").replace(/```json\n?|\n?```/g, "").trim();
+      // Same fence-extraction fix as the stats block above — this had the identical
+      // bug, meaning bot-setup settings (manifest channel restriction, request-cleanup
+      // hours, support role) were also silently resetting to defaults on every redeploy.
+      const fenceMatch = existingConfig.content.match(/```json\n([\s\S]*?)\n```/);
       try {
         botConfig = {
           manifestChannelId: null,
           requestCleanupHours: null,
           supportRoleId: null,
-          ...JSON.parse(jsonText || "{}"),
+          ...JSON.parse(fenceMatch ? fenceMatch[1] : "{}"),
         };
-      } catch {
+      } catch (err) {
+        console.error("Failed to parse existing config message, resetting to defaults:", err);
         botConfig = { manifestChannelId: null, requestCleanupHours: null, supportRoleId: null };
       }
       console.log("Loaded bot config");
