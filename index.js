@@ -803,9 +803,46 @@ async function fetchSteamAppDetails(appId) {
   return entry.data;
 }
 
-// Strips characters that aren't safe in a filename/GitHub path, but leaves spaces alone.
+// Converts a standalone Roman numeral word to its Arabic number, e.g. "III" -> "3".
+// Only matches whole, ALL-CAPS words that are valid Roman numerals — this avoids
+// misfiring on ordinary words that happen to be made of the letters I/V/X/L/C/D/M
+// (lowercase or mixed-case words are left untouched entirely).
+const ROMAN_NUMERAL_PATTERN = /^M{0,4}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})$/;
+
+function romanToArabic(roman) {
+  const values = { I: 1, V: 5, X: 10, L: 50, C: 100, D: 500, M: 1000 };
+  let total = 0;
+  for (let i = 0; i < roman.length; i++) {
+    const current = values[roman[i]];
+    const next = values[roman[i + 1]];
+    total += next && current < next ? -current : current;
+  }
+  return total;
+}
+
+function convertRomanNumeralWords(name) {
+  return name
+    .split(" ")
+    .map((word) => {
+      if (word.length > 0 && /^[IVXLCDM]+$/.test(word) && ROMAN_NUMERAL_PATTERN.test(word)) {
+        const value = romanToArabic(word);
+        if (value > 0) return String(value);
+      }
+      return word;
+    })
+    .join(" ");
+}
+
+// Keeps only letters, numbers, and spaces — strips everything else (trademark
+// symbols, colons, apostrophes, hyphens, etc.) BEFORE checking for Roman numerals,
+// so a numeral with punctuation stuck to it (e.g. "VII:") still gets recognized
+// once the colon is gone — then collapses any doubled-up spaces left behind.
 function sanitizeFilename(name) {
-  return name.replace(/[\\/:*?"<>|]/g, "").trim();
+  const cleaned = name
+    .replace(/[^a-zA-Z0-9 ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return convertRomanNumeralWords(cleaned);
 }
 
 // Keeps a value safe to sit inside the `Key = "value"` format the info .txt files use —
