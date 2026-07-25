@@ -1,6 +1,6 @@
 import express from "express";
 import crypto from "crypto";
-import { Client, GatewayIntentBits, ActivityType } from "discord.js";
+import { Client, GatewayIntentBits, ActivityType, EmbedBuilder } from "discord.js";
 
 const {
   DISCORD_BOT_TOKEN,
@@ -13,6 +13,8 @@ const {
   GITHUB_TOKEN, // optional, raises GitHub API rate limits for the file-count check
   GUILD_ID, // optional — set this for instant slash command registration in one server;
             // without it, global commands can take up to ~1 hour to show up everywhere
+  IMAGE_FOLDER = "images", // folder to look in for a matching image (same base filename)
+  TEXT_FOLDER = "info", // folder to look in for a matching .txt info file (same base filename)
 } = process.env;
 
 const required = {
@@ -31,6 +33,8 @@ for (const [key, value] of Object.entries(required)) {
 
 // Normalize so "uploads", "uploads/", "/uploads" all behave the same
 const normalizedFolder = TARGET_FOLDER.replace(/^\/+|\/+$/g, "");
+const normalizedImageFolder = IMAGE_FOLDER.replace(/^\/+|\/+$/g, "");
+const normalizedTextFolder = TEXT_FOLDER.replace(/^\/+|\/+$/g, "");
 
 // --- Discord setup ---
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -110,9 +114,9 @@ function stripExtension(filename) {
 // updateFileCountStatus (on startup, every 15 min, and after each relevant push).
 let folderFilesCache = [];
 
-async function fetchFolderFiles() {
+async function fetchFolderContents(folderPath) {
   const url = `https://api.github.com/repos/${GITHUB_REPO}/contents/${encodeURI(
-    normalizedFolder
+    folderPath
   )}?ref=${BRANCH}`;
   const headers = { Accept: "application/vnd.github+json" };
   if (GITHUB_TOKEN) headers.Authorization = `Bearer ${GITHUB_TOKEN}`;
@@ -125,6 +129,100 @@ async function fetchFolderFiles() {
   const contents = await res.json();
   if (!Array.isArray(contents)) return [];
   return contents.filter((item) => item.type === "file");
+}
+
+async function fetchFolderFiles() {
+  return fetchFolderContents(normalizedFolder);
+}
+
+// Looks in IMAGE_FOLDER for a file with the same base name (extension ignored),
+// e.g. "terraria.zip" in the manifest folder matches "terraria.png" in the image folder.
+async function findMatchingImage(baseName) {
+  try {
+    const files = await fetchFolderContents(normalizedImageFolder);
+    const match = files.find(
+      (f) => stripExtension(f.name).toLowerCase() === baseName.toLowerCase()
+    );
+    if (!match) return null;
+    return `https://raw.githubusercontent.com/${GITHUB_REPO}/${BRANCH}/${encodeURI(match.path)}`;
+  } catch (err) {
+    console.error("Error looking up matching image:", err);
+    return null;
+  }
+}
+
+// Parses lines like: Description = "some text"
+// Recognizes: Description, Price, Developer, Last Updated
+function parseInfoText(text) {
+  const result = {};
+  const regex = /^\s*(Description|Price|Developer|Last Updated)\s*=\s*"([^"]*)"\s*$/gim;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    result[match[1]] = match[2];
+  }
+  return result;
+}
+
+// Looks in TEXT_FOLDER for a .txt file with the same base name (extension ignored),
+// e.g. "terraria.zip" in the manifest folder matches "terraria.txt" in the info folder.
+async function findMatchingInfoText(baseName) {
+  try {
+    const files = await fetchFolderContents(normalizedTextFolder);
+    const match = files.find(
+      (f) =>
+        stripExtension(f.name).toLowerCase() === baseName.toLowerCase() &&
+        f.name.toLowerCase().endsWith(".txt")
+    );
+    if (!match) return null;
+
+    const rawUrl = `https://raw.githubusercontent.com/${GITHUB_REPO}/${BRANCH}/${encodeURI(match.path)}`;
+    const res = await fetch(rawUrl);
+    if (!res.ok) return null;
+
+    const text = await res.text();
+    return parseInfoText(text);
+  } catch (err) {
+    console.error("Error looking up matching info text:", err);
+    return null;
+  }
+}
+
+// Finds the earliest commit that touched this file, i.e. when it was added.
+// Falls back to null if it can't be determined.
+async function getFileAddedDate(filePath) {
+  try {
+    const url = `https://api.github.com/repos/${GITHUB_REPO}/commits?path=${encodeURI(
+      filePath
+    )}&sha=${BRANCH}&per_page=100`;
+    const headers = { Accept: "application/vnd.github+json" };
+    if (GITHUB_TOKEN) headers.Authorization = `Bearer ${GITHUB_TOKEN}`;
+
+    const res = await fetch(url, { headers });
+    if (!res.ok) return null;
+
+    const commits = await res.json();
+    if (!Array.isArray(commits) || commits.length === 0) return null;
+
+    // Commits come back newest-first; the last entry is the oldest we fetched.
+    const oldest = commits[commits.length - 1];
+    const dateStr = oldest.commit?.author?.date || oldest.commit?.committer?.date;
+    return dateStr ? new Date(dateStr) : null;
+  } catch (err) {
+    console.error("Error fetching file added date:", err);
+    return null;
+  }
+}
+
+function formatFileSize(bytes) {
+  const kb = bytes / 1024;
+  if (kb >= 1024) {
+    return `${(kb / 1024).toFixed(2)} MB`;
+  }
+  return `${kb.toFixed(2)} KB`;
+}
+
+function formatDate(date) {
+  return date.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 }
 
 async function updateFileCountStatus() {
@@ -180,18 +278,58 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    const MAX_RESULTS = 20;
-    const lines = matches.slice(0, MAX_RESULTS).map((f) => {
-      const nameWithoutExt = stripExtension(f.name);
-      const rawUrl = `https://raw.githubusercontent.com/${GITHUB_REPO}/${BRANCH}/${encodeURI(f.path)}`;
-      return `[${nameWithoutExt}](<${rawUrl}>)`;
-    });
-
-    if (matches.length > MAX_RESULTS) {
-      lines.push(`…and ${matches.length - MAX_RESULTS} more. Try a more specific name.`);
+    if (matches.length > 1) {
+      const MAX_LISTED = 20;
+      const names = matches.slice(0, MAX_LISTED).map((f) => `• ${stripExtension(f.name)}`);
+      if (matches.length > MAX_LISTED) {
+        names.push(`…and ${matches.length - MAX_LISTED} more.`);
+      }
+      await interaction.editReply(
+        `Found ${matches.length} matches — be more specific:\n${names.join("\n")}`
+      );
+      return;
     }
 
-    await interaction.editReply(lines.join("\n"));
+    const file = matches[0];
+    const nameWithoutExt = stripExtension(file.name);
+    const rawUrl = `https://raw.githubusercontent.com/${GITHUB_REPO}/${BRANCH}/${encodeURI(file.path)}`;
+
+    const [imageUrl, addedDate, infoData] = await Promise.all([
+      findMatchingImage(nameWithoutExt),
+      getFileAddedDate(file.path),
+      findMatchingInfoText(nameWithoutExt),
+    ]);
+
+    const fields = [
+      { name: "File Size", value: formatFileSize(file.size), inline: true },
+      { name: "Added", value: addedDate ? formatDate(addedDate) : "Unknown", inline: true },
+    ];
+    if (infoData?.Price) fields.push({ name: "Price", value: infoData.Price, inline: true });
+    if (infoData?.Developer) fields.push({ name: "Developer", value: infoData.Developer, inline: true });
+    if (infoData?.["Last Updated"]) {
+      fields.push({ name: "Last Updated", value: infoData["Last Updated"], inline: true });
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle(nameWithoutExt)
+      .setURL(rawUrl)
+      .setColor(0x5865f2)
+      .addFields(fields)
+      .setFooter({
+        text: `Requested by ${interaction.user.username} • Manifest bot by Zarak_Plays`,
+        iconURL: interaction.user.displayAvatarURL(),
+      })
+      .setTimestamp();
+
+    if (infoData?.Description) {
+      embed.setDescription(infoData.Description);
+    }
+
+    if (imageUrl) {
+      embed.setImage(imageUrl);
+    }
+
+    await interaction.editReply({ embeds: [embed] });
   } catch (err) {
     console.error("Error handling /manifest command:", err);
     await interaction.editReply("Something went wrong looking that up — try again in a bit.");
