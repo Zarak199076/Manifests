@@ -1,0 +1,4 @@
+Description = "Dive into the parallel story to UNDERTALE! Fight or spare your way through action-packed battles as you explore a mysterious world alongside an endearing cast of new and familiar characters. Chapters 1-5 are available now, with more planned as free updates!"
+app_id = "1671210"
+Price = "$24.99"
+Developer = "tobyfox"
