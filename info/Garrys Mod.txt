@@ -1,0 +1,4 @@
+Description = "Garry's Mod is a physics sandbox. There aren't any predefined aims or goals. We give you the tools and leave you to play."
+app_id = "4000"
+Price = "$4.99"
+Developer = "Facepunch Studios"
