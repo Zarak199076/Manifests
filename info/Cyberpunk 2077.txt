@@ -1,0 +1,4 @@
+Description = "Cyberpunk 2077 is an open-world, action-adventure RPG set in the dark future of Night City — a dangerous megalopolis obsessed with power, glamor, and ceaseless body modification."
+Price = "$59.99"
+Developer = "CD PROJEKT RED"
+Last Updated = "September 11, 2025"
