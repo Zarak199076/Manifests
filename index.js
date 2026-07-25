@@ -359,7 +359,13 @@ async function setupStatsChannel() {
       return;
     }
 
-    let channel = guild.channels.cache.find(
+    // Fetch live from Discord's API instead of trusting the local cache — right
+    // after a redeploy the cache isn't guaranteed to be populated yet, which was
+    // causing this to miss the already-existing channel, create a duplicate, and
+    // wipe stats/config back to defaults on every restart. (Same pattern already
+    // used in cleanupOldRequestChannels below, just applied here too.)
+    const channels = await guild.channels.fetch();
+    let channel = channels.find(
       (c) => c.name === STATS_CHANNEL_NAME && c.type === ChannelType.GuildText
     );
 
