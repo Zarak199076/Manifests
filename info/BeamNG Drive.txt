@@ -1,0 +1,4 @@
+Description = "A dynamic soft-body physics vehicle simulator capable of doing just about anything."
+app_id = "284160"
+Price = "$24.99"
+Developer = "BeamNG"
