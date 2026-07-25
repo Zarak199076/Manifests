@@ -1,4 +1,4 @@
 Description = "From Bethesda Game Studios, the award-winning creators of Starfield and The Elder Scrolls V: Skyrim, comes Fallout 4. A landmark in open-world RPG design and winner of over 200 ‘Best Of’ honors, including the DICE and BAFTA Game of the Year."
+app_id = "377160"
 Price = "$19.99"
 Developer = "Bethesda Game Studios"
-Last Updated = "May 27, 2026"
