@@ -1,0 +1,4 @@
+Description = "Portal™ is a new single player game from Valve. Set in the mysterious Aperture Science Laboratories, Portal has been called one of the most innovative new games on the horizon and will offer gamers hours of unique gameplay."
+app_id = "400"
+Price = "$9.99"
+Developer = "Valve"
