@@ -1,0 +1,4 @@
+Description = "Dynamic seasons change everything at the world’s greatest automotive festival. Go it alone or team up with others to explore beautiful and historic Britain in a shared open world."
+app_id = "1293830"
+Price = "N/A"
+Developer = "Playground Games"
