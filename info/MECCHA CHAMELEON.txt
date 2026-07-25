@@ -1,0 +1,4 @@
+Description = "Paint yourself to blend in! &quot;Meccha Chameleon&quot; is a new-sensation hide-and-seek game where you paint your white body to mimic the stage. Spot, pose, and &quot;artistic skill&quot; are keys to survival. Deceive Seekers with techniques that put chameleons to shame! Supports public matches and streaming."
+app_id = "4704690"
+Price = "$5.09"
+Developer = "lemorion_1224"
