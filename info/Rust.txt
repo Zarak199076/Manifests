@@ -1,0 +1,4 @@
+Description = "The only aim in Rust is to survive. Everything wants you to die - the island’s wildlife, other inhabitants, the environment, and other survivors. Do whatever it takes to last another night."
+app_id = "252490"
+Price = "39.99"
+Developer = "Facepunch Studios"
