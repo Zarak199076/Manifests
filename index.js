@@ -249,13 +249,15 @@ async function findMatchingImage(baseName) {
 }
 
 // Parses lines like: Description = "some text"
-// Recognizes: Description, Price, Developer, Last Updated
+// Recognizes: Description, Price, Developer, Last Updated, App ID (also accepts app_id / AppID)
 function parseInfoText(text) {
   const result = {};
-  const regex = /^\s*(Description|Price|Developer|Last Updated)\s*=\s*"([^"]*)"\s*$/gim;
+  const regex = /^\s*(Description|Price|Developer|Last Updated|App[ _]?ID)\s*=\s*"([^"]*)"\s*$/gim;
   let match;
   while ((match = regex.exec(text)) !== null) {
-    result[match[1]] = match[2];
+    let key = match[1];
+    if (/^App[ _]?ID$/i.test(key)) key = "App ID"; // normalize app_id / AppID / App ID to one key
+    result[key] = match[2];
   }
   return result;
 }
@@ -750,6 +752,7 @@ client.on("interactionCreate", async (interaction) => {
     ];
     if (infoData?.Price) fields.push({ name: "Price", value: infoData.Price, inline: true });
     if (infoData?.Developer) fields.push({ name: "Developer", value: infoData.Developer, inline: true });
+    if (infoData?.["App ID"]) fields.push({ name: "App ID", value: infoData["App ID"], inline: true });
     if (infoData?.["Last Updated"]) {
       fields.push({ name: "Last Updated", value: infoData["Last Updated"], inline: true });
     }
