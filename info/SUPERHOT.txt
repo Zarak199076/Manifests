@@ -1,0 +1,4 @@
+Description = "SUPERHOT is the smash-hit FPS where time moves only when you move. No regenerating health bars. No conveniently placed ammo drops. It's you, alone, outnumbered and outgunned. Snatch weapons from fallen enemies to shoot, slice and dodge through a truly cinematic hurricane of slow-motion bullets."
+app_id = "322500"
+Price = "$24.99"
+Developer = "SUPERHOT Team"
