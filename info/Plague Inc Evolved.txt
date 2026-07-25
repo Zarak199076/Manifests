@@ -1,0 +1,4 @@
+Description = "Plague Inc: Evolved is a unique mix of high strategy and terrifyingly realistic simulation. Your pathogen has just infected 'Patient Zero' - now you must bring about the end of human history by evolving a deadly, global Plague whilst adapting against everything humanity can do to defend itself."
+app_id = "246620"
+Price = "$14.99"
+Developer = "Ndemic Creations"
