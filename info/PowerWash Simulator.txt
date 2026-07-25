@@ -1,0 +1,4 @@
+Description = "Release the Pressure with PowerWash Simulator! Wash away your worries with the soothing sounds of high-pressure water. Fire up your power washer and blast away every speck of dirt and grime you can find, all with the simple satisfaction of power-washing to a sparkling finish."
+app_id = "1290000"
+Price = "$24.99"
+Developer = "FuturLab"
