@@ -1,0 +1,4 @@
+Description = "Fight, farm, build and work alongside mysterious creatures called &quot;Pals&quot; in this completely new multiplayer, open world survival and crafting game!"
+app_id = "1623730"
+Price = "$29.99"
+Developer = "Pocketpair"
