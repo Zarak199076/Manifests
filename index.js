@@ -123,6 +123,19 @@ client.once("ready", async () => {
           },
         ],
       },
+      {
+        name: "support-role",
+        description: "Set the role that can see /request-update and /request-new channels",
+        type: 1, // SUB_COMMAND
+        options: [
+          {
+            name: "role",
+            description: "The support/admin role to grant access — omit to clear it",
+            type: 8, // ROLE
+            required: false,
+          },
+        ],
+      },
     ],
   };
 
@@ -324,7 +337,7 @@ function formatStatsMessage() {
 
 // --- Bot config, stored the same way (a message in the same private channel).
 // Add new settings here as they come up — same pattern as manifestChannelId.
-let botConfig = { manifestChannelId: null, requestCleanupHours: null };
+let botConfig = { manifestChannelId: null, requestCleanupHours: null, supportRoleId: null };
 let configMessage = null;
 const CONFIG_MARKER = "⚙️ Bot config data — do not delete this message";
 
@@ -394,13 +407,18 @@ async function setupStatsChannel() {
       configMessage = existingConfig;
       const jsonText = existingConfig.content.replace(CONFIG_MARKER, "").replace(/```json\n?|\n?```/g, "").trim();
       try {
-        botConfig = { manifestChannelId: null, requestCleanupHours: null, ...JSON.parse(jsonText || "{}") };
+        botConfig = {
+          manifestChannelId: null,
+          requestCleanupHours: null,
+          supportRoleId: null,
+          ...JSON.parse(jsonText || "{}"),
+        };
       } catch {
-        botConfig = { manifestChannelId: null, requestCleanupHours: null };
+        botConfig = { manifestChannelId: null, requestCleanupHours: null, supportRoleId: null };
       }
       console.log("Loaded bot config");
     } else {
-      botConfig = { manifestChannelId: null, requestCleanupHours: null };
+      botConfig = { manifestChannelId: null, requestCleanupHours: null, supportRoleId: null };
       configMessage = await channel.send(formatConfigMessage());
       console.log("Created new config message");
     }
@@ -518,41 +536,55 @@ async function createRequestChannel(interaction, kind) {
   const uniqueSuffix = Date.now().toString().slice(-4);
   const channelName = `${label}-${safeUsername}-${uniqueSuffix}`;
 
+  const overwrites = [
+    {
+      id: guild.roles.everyone.id,
+      deny: [PermissionFlagsBits.ViewChannel],
+    },
+    {
+      id: interaction.user.id,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.AttachFiles,
+      ],
+    },
+    {
+      id: client.user.id,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ManageChannels,
+      ],
+    },
+  ];
+
+  if (botConfig.supportRoleId) {
+    overwrites.push({
+      id: botConfig.supportRoleId,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+      ],
+    });
+  }
+
   try {
     const channel = await guild.channels.create({
       name: channelName,
       type: ChannelType.GuildText,
       topic: `${kind === "update" ? "Update" : "New file"} request from ${interaction.user.tag}`,
-      permissionOverwrites: [
-        {
-          id: guild.roles.everyone.id,
-          deny: [PermissionFlagsBits.ViewChannel],
-        },
-        {
-          id: interaction.user.id,
-          allow: [
-            PermissionFlagsBits.ViewChannel,
-            PermissionFlagsBits.SendMessages,
-            PermissionFlagsBits.ReadMessageHistory,
-            PermissionFlagsBits.AttachFiles,
-          ],
-        },
-        {
-          id: client.user.id,
-          allow: [
-            PermissionFlagsBits.ViewChannel,
-            PermissionFlagsBits.SendMessages,
-            PermissionFlagsBits.ManageChannels,
-          ],
-        },
-      ],
+      permissionOverwrites: overwrites,
     });
 
     const heading =
       kind === "update" ? "📦 **Update Request**" : "🆕 **New File Request**";
+    const supportMention = botConfig.supportRoleId ? ` ${`<@&${botConfig.supportRoleId}>`}` : "";
 
     await channel.send(
-      `${heading}\nRequested by ${interaction.user}\n\n**Details:** ${details}\n\nAn admin will be with you shortly. Feel free to add more info or attachments here.`
+      `${heading}\nRequested by ${interaction.user}\n\n**Details:** ${details}\n\n${supportMention ? supportMention + ", " : ""}an admin will be with you shortly. Feel free to add more info or attachments here.`
     );
 
     await interaction.editReply({ content: `Created your private channel: ${channel}` });
@@ -618,6 +650,14 @@ client.on("interactionCreate", async (interaction) => {
         hours > 0
           ? `Request channels will now be auto-deleted ${hours} hour(s) after they're created.`
           : "Auto-delete for request channels has been turned off.";
+      await interaction.reply({ content: message, ephemeral: true });
+    } else if (interaction.options.getSubcommand() === "support-role") {
+      const role = interaction.options.getRole("role");
+      botConfig.supportRoleId = role ? role.id : null;
+      await saveBotConfig();
+      const message = role
+        ? `${role} can now see \`/request-update\` and \`/request-new\` channels.`
+        : "Support role cleared — only the requester (and admins) will see new request channels.";
       await interaction.reply({ content: message, ephemeral: true });
     }
     return;
