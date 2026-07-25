@@ -1,4 +1,0 @@
-Description = "Call of Duty®: Black Ops III Zombies Chronicles Edition includes the full base game plus the Zombies Chronicles content expansion."
-app_id = "311210"
-Price = "$59.99"
-Developer = "Treyarch, Aspyr (Mac)"
