@@ -1,0 +1,4 @@
+Description = "Half Sword is a physics-based medieval combat simulator featuring historically accurate XV-century arms and armor. We are not afraid to show the brutal nature of medieval combat with in-depth blood and gore features."
+app_id = "2397300"
+Price = "$24.99"
+Developer = "Half Sword Games"
