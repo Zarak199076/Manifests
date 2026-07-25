@@ -156,13 +156,13 @@ client.once("ready", async () => {
 
   const steamImportCommand = {
     name: "steam-import",
-    description: "Fetch a Steam game's header image + info and add them to the image/info folders",
+    description: "Fetch Steam game(s) header image + info and add them to the image/info folders",
     default_member_permissions: PermissionFlagsBits.Administrator.toString(),
     options: [
       {
         name: "app_id",
-        description: "The Steam App ID, e.g. 105600 for Terraria",
-        type: 4, // INTEGER
+        description: "One or more Steam App IDs, comma-separated — e.g. 400, 620",
+        type: 3, // STRING
         required: true,
       },
     ],
@@ -851,31 +851,17 @@ function sanitizeForQuotedField(text) {
   return (text || "").replace(/"/g, "'").replace(/\s+/g, " ").trim();
 }
 
-async function handleSteamImport(interaction) {
-  if (!GITHUB_TOKEN) {
-    await interaction.reply({
-      content:
-        "This command needs `GITHUB_TOKEN` set with write access to the repo first — see the README.",
-      ephemeral: true,
-    });
-    return;
-  }
-
-  const appId = interaction.options.getInteger("app_id", true);
-  await interaction.deferReply({ ephemeral: true });
-
+// Imports a single Steam app: fetches its details, downloads the header image, and
+// commits both files. Returns a result object rather than replying directly, so the
+// caller can batch several of these into one summary message.
+async function importSteamApp(appId) {
   try {
     const data = await fetchSteamAppDetails(appId);
     if (!data) {
-      await interaction.editReply(
-        `Couldn't find a Steam app with ID \`${appId}\` (or it's not available/visible in the US store).`
-      );
-      return;
+      return { success: false, reason: "not found (or not available/visible in the US store)" };
     }
-
     if (!data.header_image) {
-      await interaction.editReply(`Found **${data.name}**, but it doesn't have a header image available.`);
-      return;
+      return { success: false, reason: `found "${data.name}" but it has no header image` };
     }
 
     const gameName = sanitizeFilename(data.name || `app-${appId}`);
@@ -898,17 +884,72 @@ async function handleSteamImport(interaction) {
     await commitFileToRepo(`${normalizedImageFolder}/${gameName}.png`, imageBuffer);
     await commitFileToRepo(`${normalizedTextFolder}/${gameName}.txt`, Buffer.from(infoText, "utf-8"));
 
-    await interaction.editReply(
-      `Added **${data.name}**:\n` +
-        `• \`${normalizedImageFolder}/${gameName}.png\`\n` +
-        `• \`${normalizedTextFolder}/${gameName}.txt\`\n\n` +
-        `Note: Steam serves this header image as an actual JPEG even though it's named \`.png\` — ` +
-        `that's Steam's own convention, and it still displays fine everywhere (Discord embeds, browsers, etc).`
-    );
+    return { success: true, name: data.name };
   } catch (err) {
-    console.error("Error handling /steam-import:", err);
-    await interaction.editReply("Something went wrong fetching that game — try again in a bit.");
+    console.error(`Error importing Steam app ${appId}:`, err);
+    return { success: false, reason: "something went wrong fetching or uploading it" };
   }
+}
+
+const MAX_STEAM_IMPORT_IDS = 10; // keep each run reasonably sized — one Steam + two GitHub calls per ID
+
+async function handleSteamImport(interaction) {
+  if (!GITHUB_TOKEN) {
+    await interaction.reply({
+      content:
+        "This command needs `GITHUB_TOKEN` set with write access to the repo first — see the README.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const rawInput = interaction.options.getString("app_id", true);
+  const tokens = rawInput
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+
+  if (tokens.length === 0) {
+    await interaction.reply({ content: "Please provide at least one Steam App ID.", ephemeral: true });
+    return;
+  }
+  if (tokens.length > MAX_STEAM_IMPORT_IDS) {
+    await interaction.reply({
+      content: `Please limit this to ${MAX_STEAM_IMPORT_IDS} app IDs per run.`,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const appIds = [];
+  const invalidTokens = [];
+  for (const token of tokens) {
+    const id = Number(token);
+    if (Number.isInteger(id) && id > 0) appIds.push(id);
+    else invalidTokens.push(token);
+  }
+
+  if (appIds.length === 0) {
+    await interaction.reply({ content: "None of those looked like valid Steam App IDs.", ephemeral: true });
+    return;
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+
+  // Sequential, not parallel — gentler on both Steam's and GitHub's APIs, and keeps
+  // GitHub commit order predictable if two IDs happened to touch the same filename.
+  const lines = [];
+  for (const appId of appIds) {
+    const result = await importSteamApp(appId);
+    lines.push(
+      result.success ? `✅ **${result.name}** (${appId})` : `❌ \`${appId}\` — ${result.reason}`
+    );
+  }
+  for (const bad of invalidTokens) {
+    lines.push(`❌ \`${bad}\` — not a valid app ID`);
+  }
+
+  await interaction.editReply(lines.join("\n").slice(0, 2000));
 }
 
 client.on("interactionCreate", async (interaction) => {
