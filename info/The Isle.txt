@@ -1,0 +1,4 @@
+Description = "Experience fierce open world survival gameplay as you attempt to stay alive on an unforgiving island inhabited by dinosaurs! Hunt. Grow. Survive."
+app_id = "376210"
+Price = "$19.99"
+Developer = "Afterthought LLC"
