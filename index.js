@@ -1,12 +1,26 @@
+// index.js
+// Standalone Discord bot. Slash commands:
+//   /ping-test — pings you once per second in the channel until you run /ping-stop
+//   /ping-stop — stops your active ping loop
+//
+// Setup:
+//   1. npm install discord.js
+//   2. Create a .env file with:
+//        DISCORD_TOKEN=your_bot_token
+//        CLIENT_ID=your_application_id
+//   3. node deploy-commands.js   (registers the slash commands, run once / on changes)
+//   4. node index.js            (starts the bot)
+
 require('dotenv').config();
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
 
-const MAX_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
+const MAX_DURATION_MS = 10 * 24 * 60 * 60 * 1000;
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
 });
 
+// userId -> loop state
 const activeLoops = new Map();
 
 const commands = [
@@ -86,7 +100,7 @@ client.on('interactionCreate', async (interaction) => {
         console.error('Ping loop send failed, stopping:', err);
         stopLoop(userId);
       }
-    }, 1000);
+    }, 400); // <-- change this to adjust ping rate. 1000 = 1/sec, 500 = 2/sec, 333 = 3/sec, 250 = 4/sec
 
     loopState.safetyTimeoutId = setTimeout(() => {
       const stopped = stopLoop(userId);
