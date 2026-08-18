@@ -1,14 +1,49 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
 
-const MAX_DURATION_MS = 10 * 60 * 1000; // safety ceiling: 10 minutes
+const MAX_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
 });
 
-// userId -> loop state
 const activeLoops = new Map();
+
+const commands = [
+  new SlashCommandBuilder()
+    .setName('ping-test')
+    .setDescription('Ping you once per second until you run /ping-stop')
+    .toJSON(),
+  new SlashCommandBuilder()
+    .setName('ping-stop')
+    .setDescription('Stop your active ping loop')
+    .toJSON(),
+];
+
+async function registerCommands() {
+  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+  const guildId = process.env.GUILD_ID;
+
+  try {
+    if (guildId) {
+      // Guild-scoped: registers instantly, only visible in this one server.
+      await rest.put(
+        Routes.applicationGuildCommands(process.env.CLIENT_ID, guildId),
+        { body: commands },
+      );
+      console.log(`Slash commands registered for guild ${guildId}.`);
+    } else {
+      // Global: can take up to an hour to propagate, visible in every server the bot is in.
+      await rest.put(
+        Routes.applicationCommands(process.env.CLIENT_ID),
+        { body: commands },
+      );
+      console.log('Slash commands registered globally (no GUILD_ID set — may take up to an hour to show up).');
+    }
+  } catch (err) {
+    console.error('Failed to register slash commands:', err);
+  }
+}
 
 function stopLoop(userId) {
   const loop = activeLoops.get(userId);
@@ -19,8 +54,9 @@ function stopLoop(userId) {
   return loop;
 }
 
-client.once('ready', () => {
+client.once('clientReady', async () => {
   console.log(`Logged in as ${client.user.tag}`);
+  await registerCommands();
 });
 
 client.on('interactionCreate', async (interaction) => {
@@ -55,7 +91,7 @@ client.on('interactionCreate', async (interaction) => {
     loopState.safetyTimeoutId = setTimeout(() => {
       const stopped = stopLoop(userId);
       if (stopped) {
-        channel.send(`<@${userId}> Auto-stopped after ${MAX_DURATION_MS / 60000000000000} min (sent ${stopped.count} pings).`);
+        channel.send(`<@${userId}> Auto-stopped after ${MAX_DURATION_MS / 60000} min (sent ${stopped.count} pings).`);
       }
     }, MAX_DURATION_MS);
 
