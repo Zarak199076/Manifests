@@ -1,18 +1,15 @@
 {
-  "name": "github-folder-to-discord",
+  "name": "ping-test-bot",
   "version": "1.0.0",
-  "description": "Posts a link to Discord whenever a file is added/updated in a specific GitHub folder",
-  "type": "module",
+  "description": "Standalone Discord bot with /ping-test and /ping-stop commands",
   "main": "index.js",
+  "type": "commonjs",
   "scripts": {
+    "deploy": "node deploy-commands.js",
     "start": "node index.js"
   },
-  "engines": {
-    "node": ">=18"
-  },
   "dependencies": {
-    "adm-zip": "^0.5.10",
     "discord.js": "^14.14.1",
-    "express": "^4.19.2"
+    "dotenv": "^16.4.5"
   }
 }
